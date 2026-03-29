@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.env
+.venv/
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+
+# Byte-compiled / cached / logs
+*.log
+
+# Runtime data
+*.sqlite3
+
+# Project data
+data/store.json
+
+# macOS/Linux cruft
+.DS_Store
+Thumbs.db
+
