@@ -1,5 +1,5 @@
 # Lightweight image for the Telegram bot
-FROM cgr.dev/chainguard/python:3.12-dev
+FROM mirror.gcr.io/library/python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
