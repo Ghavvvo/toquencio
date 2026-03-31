@@ -35,7 +35,7 @@ FALLBACK_REPLIES = [
     "Esto no funciona asi",
     "Qué pesado eres",
     "Corta ya",
-    "Tú estás aburrío o qué?",
+    "Tú estás aburrido o qué?",
     "Qué bolá contigo?",
     "Déjame con mi vida",
     "No me vengas con cuentos",
