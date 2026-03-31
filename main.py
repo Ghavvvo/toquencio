@@ -6,18 +6,42 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
+import random
 from dotenv import load_dotenv
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, JobQueue
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, JobQueue
 
 load_dotenv()
 
-CUBANOMIC_URL_DEFAULT = (
-    "https://api.cubanomic.com/api/v1/x-rates-by-date-range-history?"
-    "trmi=true&cur=USD&token=aCY78gC3kWRv1pR7VfgSlg&period=2D"
-)
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_DATA: Dict[str, Any] = {"users": [], "last_median": None}
+
+FALLBACK_REPLIES = [
+    "Qué quieres?",
+    "Estás aburrido?",
+    "Déjame tranquilo",
+    "Déjame vivir",
+    "Deja la muela",
+    "Corta la wara",
+    "No me molestes",
+    "brother...",
+    "No tienes chamba?",
+    "Ya salió el preguntón",
+    "No inventes",
+    "Anda pa'llá bobo",
+    "Déjame en paz",
+    "No me jodas",
+    "Búscate algo que hacer",
+    "Esto no funciona asi",
+    "Qué pesado eres",
+    "Corta ya",
+    "Tú estás aburrío o qué?",
+    "Qué bolá contigo?",
+    "Déjame con mi vida",
+    "No me vengas con cuentos",
+    "Tú sí eres especial",
+    "Ya, suéltame"
+]
 
 
 class JsonStore:
@@ -90,13 +114,17 @@ def build_settings() -> Dict[str, Any]:
     if not telegram_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN es obligatorio")
 
+    cubanomic_url = os.getenv("CUBANOMIC_URL")
+    if not cubanomic_url:
+        raise RuntimeError("CUBANOMIC_URL es obligatorio en el archivo .env")
+
     return {
         "telegram_token": telegram_token,
         "openrouter_api_key": os.getenv("OPENROUTER_API_KEY", ""),
         "openrouter_model": os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"),
         "poll_seconds": int(os.getenv("POLL_SECONDS", "60")),
         "store_path": Path(os.getenv("STORE_PATH", "data/store.json")),
-        "cubanomic_url": os.getenv("CUBANOMIC_URL", CUBANOMIC_URL_DEFAULT),
+        "cubanomic_url": cubanomic_url,
     }
 
 
@@ -113,11 +141,11 @@ async def fetch_current_median(client: httpx.AsyncClient, url: str) -> float:
 
 
 async def generate_openrouter_message(
-    client: httpx.AsyncClient,
-    api_key: str,
-    model: str,
-    previous: float,
-    current: float,
+        client: httpx.AsyncClient,
+        api_key: str,
+        model: str,
+        previous: float,
+        current: float,
 ) -> str:
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY es obligatorio para IA")
@@ -129,7 +157,7 @@ async def generate_openrouter_message(
                 "role": "user",
                 "content": (
                     "Eres un analista financiero cubano con sentido del humor. "
-                    "Usas frecuentemente palabras como \"asere\", \"consorte\" . "
+                    "Usas frecuentemente palabras como \"asere\" . "
                     f"El valor del USD respecto al peso cubano ha cambiado de {format_cup(previous)} "
                     f"CUP a {format_cup(current)} CUP. Redacta un mensaje muy breve para Telegram "
                     "informando esto con un tono sarcástico y cómico e informal."
@@ -166,7 +194,12 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     store: JsonStore = context.application.bot_data["store"]
     added = await store.add_user(update.effective_user.id)
     greeting = (
-        "Asere, bienvenido. Te avisaremos cuando el USD se mueva."
+        "Asere, bienvenido. Soy Toquencio y te enviaré notificaciones en tiempo real "
+        "cada vez que cambie el precio del USD en el Toque.\n\n"
+        "Comandos disponibles:\n"
+        "/start - Suscribirse a las notificaciones\n"
+        "/stop - Darse de baja de la lista\n"
+        "/status - Ver el último precio registrado"
         if added
         else "Consorte, ya estabas en la lista. Mantente en sintonía."
     )
@@ -190,6 +223,11 @@ async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         msg = f"Último valor registrado: {format_cup(last)} CUP."
     await update.message.reply_text(msg)
+
+
+async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        await update.message.reply_text(random.choice(FALLBACK_REPLIES))
 
 
 async def poll_cubanomic(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -258,7 +296,9 @@ def main() -> None:
     application.add_handler(CommandHandler("start", handle_start))
     application.add_handler(CommandHandler("stop", handle_stop))
     application.add_handler(CommandHandler("status", handle_status))
-
+    application.add_handler(
+        CommandHandler(~filters.COMMAND & filters.TEXT, handle_unknown)
+    )
     job_queue = application.job_queue
     if job_queue is None:
         raise RuntimeError("JobQueue no está inicializado")
