@@ -264,7 +264,7 @@ async def poll_cubanomic(context: ContextTypes.DEFAULT_TYPE) -> None:
             logging.warning("OpenRouter falló, usando respaldo: %s", exc)
             message = (
                 "Asere, el USD se movió de "
-                f"{format_cup(last)} a {format_cup(current_median)} CUP. Aprieta esa billetera."
+                f"{format_cup(last)} a {format_cup(current_median)} CUP."
             )
 
         await store.set_last_median(current_median)
