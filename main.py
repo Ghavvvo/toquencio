@@ -132,12 +132,13 @@ async def fetch_current_median(client: httpx.AsyncClient, url: str) -> float:
     response = await client.get(url, timeout=10)
     response.raise_for_status()
     payload = response.json()
-    if not isinstance(payload, list) or not payload:
+    try:
+        usd_cup = payload["statistics"]["USD.CUP"]
+        if "median" not in usd_cup:
+            raise ValueError("El campo 'median' no existe en la respuesta")
+        return float(usd_cup["median"])
+    except (KeyError, TypeError):
         raise ValueError("Respuesta inesperada de Cubanomic")
-    first = payload[0]
-    if "median" not in first:
-        raise ValueError("El campo 'median' no existe en la respuesta")
-    return float(first["median"])
 
 
 async def generate_openrouter_message(
