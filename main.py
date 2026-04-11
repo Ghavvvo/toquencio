@@ -30,6 +30,7 @@ FALLBACK_REPLIES = [
     "No inventes",
     "Anda pa'llá bobo",
     "Déjame en paz",
+    "Vete a escuchar al Ferxxo"
     "No me jodas",
     "Búscate algo que hacer",
     "Esto no funciona asi",
