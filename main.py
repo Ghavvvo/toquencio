@@ -16,6 +16,34 @@ load_dotenv()
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_DATA: Dict[str, Any] = {"users": [], "last_median": None}
 
+# Lista de modelos OpenRouter gratuitos actuales (ordenados por calidad/capacidad)
+OPENROUTER_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "qwen/qwen3-coder:free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-3-27b-it:free",
+    "minimax/minimax-m2.5:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "google/gemma-3n-e4b-it:free",
+    "google/gemma-3n-e2b-it:free",
+    "google/gemma-3-12b-it:free",
+    "z-ai/glm-4.5-air:free",
+    "nvidia/nemotron-3-nano-30b-a3b:free",
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+    "openai/gpt-oss-120b:free",
+    "openai/gpt-oss-20b:free",
+    "nvidia/nemotron-nano-9b-v2:free",
+    "nvidia/nemotron-nano-12b-v2-vl:free",
+    "google/gemma-3-4b-it:free",
+    "arcee-ai/trinity-large-preview:free",
+    "liquid/lfm-2.5-1.2b-instruct:free",
+    "liquid/lfm-2.5-1.2b-thinking:free",
+]
+
 FALLBACK_REPLIES = [
     "Qué quieres?",
     "Estás aburrido?",
@@ -119,10 +147,14 @@ def build_settings() -> Dict[str, Any]:
     if not cubanomic_url:
         raise RuntimeError("CUBANOMIC_URL es obligatorio en el archivo .env")
 
+    # Modelo primario desde .env, con fallback a la lista de modelos
+    primary_model = os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free")
+    model_list = [primary_model] + [m for m in OPENROUTER_MODELS if m != primary_model]
+
     return {
         "telegram_token": telegram_token,
         "openrouter_api_key": os.getenv("OPENROUTER_API_KEY", ""),
-        "openrouter_model": os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free"),
+        "openrouter_models": model_list,
         "poll_seconds": int(os.getenv("POLL_SECONDS", "60")),
         "store_path": Path(os.getenv("STORE_PATH", "data/store.json")),
         "cubanomic_url": cubanomic_url,
@@ -145,41 +177,49 @@ async def fetch_current_median(client: httpx.AsyncClient, url: str) -> float:
 async def generate_openrouter_message(
         client: httpx.AsyncClient,
         api_key: str,
-        model: str,
+        models: List[str],
         previous: float,
         current: float,
 ) -> str:
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY es obligatorio para IA")
 
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    "Eres un analista financiero cubano con sentido del humor. "
-                    "Usas frecuentemente palabras como \"asere\" . "
-                    f"El valor del USD respecto al peso cubano ha cambiado de {format_cup(previous)} "
-                    f"CUP a {format_cup(current)} CUP. Redacta un mensaje muy breve para Telegram "
-                    "informando esto con un tono sarcástico y cómico e informal."
-                ),
-            }
-        ],
-    }
+    content = (
+        "Eres un analista financiero cubano con sentido del humor. "
+        "Usas frecuentemente palabras como \"asere\" . "
+        f"El valor del USD respecto al peso cubano ha cambiado de {format_cup(previous)} "
+        f"CUP a {format_cup(current)} CUP. Redacta un mensaje muy breve para Telegram "
+        "informando esto con un tono sarcástico y cómico e informal."
+    )
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    response = await client.post(OPENROUTER_URL, json=payload, headers=headers, timeout=15)
-    response.raise_for_status()
-    data = response.json()
-    choices = data.get("choices") or []
-    if choices:
-        message = choices[0].get("message", {}).get("content")
-        if message:
-            return message.strip()
-    raise ValueError("Respuesta de OpenRouter sin contenido utilizable")
+
+    last_error: Optional[Exception] = None
+    for model in models:
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": content}],
+        }
+        try:
+            response = await client.post(OPENROUTER_URL, json=payload, headers=headers, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            choices = data.get("choices") or []
+            if choices:
+                message = choices[0].get("message", {}).get("content")
+                if message:
+                    return message.strip()
+            raise ValueError("Respuesta de OpenRouter sin contenido utilizable")
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("Modelo %s falló: %s", model, exc)
+            last_error = exc
+            continue
+
+    raise RuntimeError(
+        f"Todos los modelos fallaron. Último error: {last_error}"
+    )
 
 
 async def broadcast_message(application: Application, user_ids: List[int], text: str) -> None:
@@ -244,6 +284,9 @@ async def poll_cubanomic(context: ContextTypes.DEFAULT_TYPE) -> None:
             logging.warning("No se pudo obtener Cubanomic: %s", exc)
             return
 
+        # Redondear a entero como El Toque (evita spam por decimales)
+        current_median = round(current_median)
+
         last = await store.get_last_median()
         if last is None:
             await store.set_last_median(current_median)
@@ -257,7 +300,7 @@ async def poll_cubanomic(context: ContextTypes.DEFAULT_TYPE) -> None:
             message = await generate_openrouter_message(
                 client,
                 settings.get("openrouter_api_key", ""),
-                settings.get("openrouter_model", "stepfun/step-3.5-flash:free"),
+                settings.get("openrouter_models", OPENROUTER_MODELS),
                 last,
                 current_median,
             )
